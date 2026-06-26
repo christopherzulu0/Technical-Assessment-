@@ -101,41 +101,54 @@ export async function POST(req: NextRequest) {
         const clerkOrgId = data.payer?.organization_id || data.organization_id || data.organization?.id
         console.log('[webhook] extracted clerkOrgId:', clerkOrgId)
         if (!clerkOrgId) break
-        const planSlug = extractPlanSlugFromClerkRecord(data)
-        console.log('[webhook] extracted planSlug:', planSlug)
 
-        const organization = await db.organization.findUnique({
-          where: { clerkOrgId },
-        })
-        console.log('[webhook] found organization:', organization ? `${organization.id} (plan: ${organization.plan})` : 'null')
-        if (!organization) {
-          try {
-            const client = await clerkClient()
-            const clerkOrg = await client.organizations.getOrganization({
-              organizationId: clerkOrgId,
-            })
-            console.log('[webhook] fetched clerk org:', JSON.stringify(clerkOrg, null, 2))
-            await upsertOrganizationFromClerk({
-              clerkOrgId,
-              name: clerkOrg.name,
-              slug: clerkOrg.slug || clerkOrgId,
-              image: clerkOrg.imageUrl,
-              planSlug: extractPlanSlugFromClerkRecord(clerkOrg),
-            })
-          } catch (error) {
-            console.error(`[webhook] fallback org sync failed for ${clerkOrgId}:`, error)
+        // Always fetch the organization from Clerk to get the most accurate plan information
+        let finalPlanSlug = extractPlanSlugFromClerkRecord(data)
+        console.log('[webhook] extracted planSlug from subscription data:', finalPlanSlug)
+
+        try {
+          const client = await clerkClient()
+          const clerkOrg = await client.organizations.getOrganization({
+            organizationId: clerkOrgId,
+          })
+          console.log('[webhook] fetched clerk org:', JSON.stringify(clerkOrg, null, 2))
+          const clerkOrgPlanSlug = extractPlanSlugFromClerkRecord(clerkOrg)
+          console.log('[webhook] extracted planSlug from clerk org:', clerkOrgPlanSlug)
+          
+          // Prefer the plan from the organization itself over the subscription data
+          if (clerkOrgPlanSlug) {
+            finalPlanSlug = clerkOrgPlanSlug
+            console.log('[webhook] using planSlug from clerk org:', finalPlanSlug)
+          }
+
+          // Ensure organization exists in our DB with correct plan
+          await upsertOrganizationFromClerk({
+            clerkOrgId,
+            name: clerkOrg.name,
+            slug: clerkOrg.slug || clerkOrgId,
+            image: clerkOrg.imageUrl,
+            planSlug: finalPlanSlug,
+          })
+        } catch (error) {
+          console.error(`[webhook] failed to fetch org from Clerk for ${clerkOrgId}:`, error)
+          // Fallback: try to create org with plan from subscription data
+          const organization = await db.organization.findUnique({
+            where: { clerkOrgId },
+          })
+          if (!organization) {
             await upsertOrganizationFromClerk({
               clerkOrgId,
               name: clerkOrgId,
               slug: clerkOrgId,
               image: null,
+              planSlug: finalPlanSlug,
             })
           }
         }
 
         const updateResult = await updateOrganizationBilling({
           clerkOrgId,
-          planSlug,
+          planSlug: finalPlanSlug,
           subscriptionStatus: data.status ?? null,
           stripeSubscriptionId: data.id,
         })
@@ -167,43 +180,56 @@ export async function POST(req: NextRequest) {
         console.log('[webhook] subscriptionItem.active/updated clerkOrgId:', clerkOrgId)
         if (!clerkOrgId) break
 
-        const organization = await db.organization.findUnique({
-          where: { clerkOrgId },
-        })
-        console.log('[webhook] subscriptionItem.active/updated found organization:', organization ? `${organization.id} (plan: ${organization.plan})` : 'null')
-        if (!organization) {
-          try {
-            const client = await clerkClient()
-            const clerkOrg = await client.organizations.getOrganization({
-              organizationId: clerkOrgId,
-            })
-            console.log('[webhook] subscriptionItem.active/updated fetched clerk org:', JSON.stringify(clerkOrg, null, 2))
-            await upsertOrganizationFromClerk({
-              clerkOrgId,
-              name: clerkOrg.name,
-              slug: clerkOrg.slug || clerkOrgId,
-              image: clerkOrg.imageUrl,
-              planSlug: extractPlanSlugFromClerkRecord(clerkOrg),
-            })
-          } catch (error) {
-            console.error(`[webhook] fallback org sync failed for ${clerkOrgId}:`, error)
+        // Always fetch the organization from Clerk to get the most accurate plan information
+        let finalPlanSlug = extractPlanSlugFromClerkRecord(data)
+        console.log('[webhook] subscriptionItem extracted planSlug from data:', finalPlanSlug)
+
+        try {
+          const client = await clerkClient()
+          const clerkOrg = await client.organizations.getOrganization({
+            organizationId: clerkOrgId,
+          })
+          console.log('[webhook] subscriptionItem fetched clerk org:', JSON.stringify(clerkOrg, null, 2))
+          const clerkOrgPlanSlug = extractPlanSlugFromClerkRecord(clerkOrg)
+          console.log('[webhook] subscriptionItem extracted planSlug from clerk org:', clerkOrgPlanSlug)
+          
+          // Prefer the plan from the organization itself over the subscriptionItem data
+          if (clerkOrgPlanSlug) {
+            finalPlanSlug = clerkOrgPlanSlug
+            console.log('[webhook] subscriptionItem using planSlug from clerk org:', finalPlanSlug)
+          }
+
+          // Ensure organization exists in our DB with correct plan
+          await upsertOrganizationFromClerk({
+            clerkOrgId,
+            name: clerkOrg.name,
+            slug: clerkOrg.slug || clerkOrgId,
+            image: clerkOrg.imageUrl,
+            planSlug: finalPlanSlug,
+          })
+        } catch (error) {
+          console.error(`[webhook] subscriptionItem failed to fetch org from Clerk for ${clerkOrgId}:`, error)
+          // Fallback: try to create org with plan from subscriptionItem data
+          const organization = await db.organization.findUnique({
+            where: { clerkOrgId },
+          })
+          if (!organization) {
             await upsertOrganizationFromClerk({
               clerkOrgId,
               name: clerkOrgId,
               slug: clerkOrgId,
               image: null,
+              planSlug: finalPlanSlug,
             })
           }
         }
 
-        const planSlug = extractPlanSlugFromClerkRecord(data)
-        console.log('[webhook] subscriptionItem.active/updated extracted planSlug:', planSlug)
         const updateResult = await updateOrganizationBilling({
           clerkOrgId,
-          planSlug,
+          planSlug: finalPlanSlug,
           subscriptionStatus: data.status ?? 'active',
         })
-        console.log('[webhook] subscriptionItem.active/updated update result:', JSON.stringify(updateResult, null, 2))
+        console.log('[webhook] subscriptionItem update result:', JSON.stringify(updateResult, null, 2))
         break
       }
       default:

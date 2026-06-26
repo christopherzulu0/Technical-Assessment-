@@ -191,30 +191,13 @@ export async function updateOrganizationBilling(data: {
 
   console.log('[updateOrganizationBilling] found organization:', organization ? `${organization.id} (current plan: ${organization.plan})` : 'null')
 
-  if (!organization) return null
-
-  let mappedPlan = data.planSlug ? mapPlanSlugToPlan(data.planSlug) : undefined
-  console.log('[updateOrganizationBilling] mapped plan:', mappedPlan, 'from planSlug:', data.planSlug)
-
-  // If no plan slug provided, try to fetch from Clerk organization
-  if (!mappedPlan) {
-    try {
-      const { clerkClient } = await import('@clerk/nextjs/server')
-      const client = await clerkClient()
-      const clerkOrg = await client.organizations.getOrganization({
-        organizationId: data.clerkOrgId,
-      })
-      console.log('[updateOrganizationBilling] fetched clerk org for plan:', JSON.stringify(clerkOrg, null, 2))
-      const fallbackPlanSlug = extractPlanSlugFromClerkRecord(clerkOrg)
-      console.log('[updateOrganizationBilling] fallback planSlug:', fallbackPlanSlug)
-      if (fallbackPlanSlug) {
-        mappedPlan = mapPlanSlugToPlan(fallbackPlanSlug)
-        console.log('[updateOrganizationBilling] using fallback mapped plan:', mappedPlan)
-      }
-    } catch (error) {
-      console.error('[updateOrganizationBilling] failed to fetch org from Clerk:', error)
-    }
+  if (!organization) {
+    console.error('[updateOrganizationBilling] organization not found, cannot update billing')
+    return null
   }
+
+  const mappedPlan = data.planSlug ? mapPlanSlugToPlan(data.planSlug) : undefined
+  console.log('[updateOrganizationBilling] mapped plan:', mappedPlan, 'from planSlug:', data.planSlug)
 
   const updateData: any = {
     ...(mappedPlan ? { plan: mappedPlan } : {}),
