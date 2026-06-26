@@ -14,6 +14,8 @@ function normalizeSlug(value: unknown): string | undefined {
 export function extractPlanSlugFromClerkRecord(data: any): string | undefined {
   if (!data) return undefined
 
+  console.log('[extractPlanSlug] input data:', JSON.stringify(data, null, 2))
+
   const candidates = [
     data.public_metadata?.planSlug,
     data.private_metadata?.planSlug,
@@ -44,11 +46,17 @@ export function extractPlanSlugFromClerkRecord(data: any): string | undefined {
     data.items?.[0]?.price?.product?.metadata?.slug,
   ]
 
+  console.log('[extractPlanSlug] candidates:', candidates)
+
   for (const candidate of candidates) {
     const slug = normalizeSlug(candidate)
-    if (slug) return slug
+    if (slug) {
+      console.log('[extractPlanSlug] found slug:', slug)
+      return slug
+    }
   }
 
+  console.log('[extractPlanSlug] no slug found, returning undefined')
   return undefined
 }
 
@@ -176,25 +184,58 @@ export async function updateOrganizationBilling(data: {
   stripeSubscriptionId?: string | null
   stripeCustomerId?: string | null
 }) {
+  console.log('[updateOrganizationBilling] input:', JSON.stringify(data, null, 2))
   const organization = await db.organization.findUnique({
     where: { clerkOrgId: data.clerkOrgId },
   })
 
+  console.log('[updateOrganizationBilling] found organization:', organization ? `${organization.id} (current plan: ${organization.plan})` : 'null')
+
   if (!organization) return null
 
-  return db.organization.update({
+  let mappedPlan = data.planSlug ? mapPlanSlugToPlan(data.planSlug) : undefined
+  console.log('[updateOrganizationBilling] mapped plan:', mappedPlan, 'from planSlug:', data.planSlug)
+
+  // If no plan slug provided, try to fetch from Clerk organization
+  if (!mappedPlan) {
+    try {
+      const { clerkClient } = await import('@clerk/nextjs/server')
+      const client = await clerkClient()
+      const clerkOrg = await client.organizations.getOrganization({
+        organizationId: data.clerkOrgId,
+      })
+      console.log('[updateOrganizationBilling] fetched clerk org for plan:', JSON.stringify(clerkOrg, null, 2))
+      const fallbackPlanSlug = extractPlanSlugFromClerkRecord(clerkOrg)
+      console.log('[updateOrganizationBilling] fallback planSlug:', fallbackPlanSlug)
+      if (fallbackPlanSlug) {
+        mappedPlan = mapPlanSlugToPlan(fallbackPlanSlug)
+        console.log('[updateOrganizationBilling] using fallback mapped plan:', mappedPlan)
+      }
+    } catch (error) {
+      console.error('[updateOrganizationBilling] failed to fetch org from Clerk:', error)
+    }
+  }
+
+  const updateData: any = {
+    ...(mappedPlan ? { plan: mappedPlan } : {}),
+    ...(data.subscriptionStatus !== undefined
+      ? { subscriptionStatus: data.subscriptionStatus }
+      : {}),
+    ...(data.stripeSubscriptionId !== undefined
+      ? { stripeSubscriptionId: data.stripeSubscriptionId }
+      : {}),
+    ...(data.stripeCustomerId !== undefined
+      ? { stripeCustomerId: data.stripeCustomerId }
+      : {}),
+  }
+
+  console.log('[updateOrganizationBilling] update data:', JSON.stringify(updateData, null, 2))
+
+  const result = await db.organization.update({
     where: { id: organization.id },
-    data: {
-      ...(data.planSlug ? { plan: mapPlanSlugToPlan(data.planSlug) } : {}),
-      ...(data.subscriptionStatus !== undefined
-        ? { subscriptionStatus: data.subscriptionStatus }
-        : {}),
-      ...(data.stripeSubscriptionId !== undefined
-        ? { stripeSubscriptionId: data.stripeSubscriptionId }
-        : {}),
-      ...(data.stripeCustomerId !== undefined
-        ? { stripeCustomerId: data.stripeCustomerId }
-        : {}),
-    },
+    data: updateData,
   })
+
+  console.log('[updateOrganizationBilling] update result:', JSON.stringify(result, null, 2))
+  return result
 }

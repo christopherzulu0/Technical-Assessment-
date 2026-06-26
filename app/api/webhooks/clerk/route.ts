@@ -56,13 +56,17 @@ export async function POST(req: NextRequest) {
       case 'organization.created':
       case 'organization.updated': {
         const { id, name, slug, image_url } = evt.data as any
-        await upsertOrganizationFromClerk({
+        console.log('[webhook] organization.created/updated data:', JSON.stringify(evt.data, null, 2))
+        const planSlug = extractPlanSlugFromClerkRecord(evt.data)
+        console.log('[webhook] organization.created/updated extracted planSlug:', planSlug)
+        const result = await upsertOrganizationFromClerk({
           clerkOrgId: id,
           name,
           slug: slug || id,
           image: image_url,
-          planSlug: extractPlanSlugFromClerkRecord(evt.data),
+          planSlug,
         })
+        console.log('[webhook] organization.created/updated result:', JSON.stringify(result, null, 2))
         break
       }
       case 'organization.deleted': {
@@ -89,21 +93,28 @@ export async function POST(req: NextRequest) {
       case 'subscription.created':
       case 'subscription.updated':
       case 'subscription.active':
-      case 'subscription.pastDue': {
+      case 'subscription.pastDue':
+      case 'subscription.renewed':
+      case 'subscription.canceled': {
         const data = evt.data as any
+        console.log('[webhook] subscription event data:', JSON.stringify(data, null, 2))
         const clerkOrgId = data.payer?.organization_id || data.organization_id || data.organization?.id
+        console.log('[webhook] extracted clerkOrgId:', clerkOrgId)
         if (!clerkOrgId) break
         const planSlug = extractPlanSlugFromClerkRecord(data)
+        console.log('[webhook] extracted planSlug:', planSlug)
 
         const organization = await db.organization.findUnique({
           where: { clerkOrgId },
         })
+        console.log('[webhook] found organization:', organization ? `${organization.id} (plan: ${organization.plan})` : 'null')
         if (!organization) {
           try {
             const client = await clerkClient()
             const clerkOrg = await client.organizations.getOrganization({
               organizationId: clerkOrgId,
             })
+            console.log('[webhook] fetched clerk org:', JSON.stringify(clerkOrg, null, 2))
             await upsertOrganizationFromClerk({
               clerkOrgId,
               name: clerkOrg.name,
@@ -122,12 +133,13 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        await updateOrganizationBilling({
+        const updateResult = await updateOrganizationBilling({
           clerkOrgId,
           planSlug,
           subscriptionStatus: data.status ?? null,
           stripeSubscriptionId: data.id,
         })
+        console.log('[webhook] billing update result:', JSON.stringify(updateResult, null, 2))
         break
       }
       case 'subscriptionItem.canceled':
@@ -135,30 +147,37 @@ export async function POST(req: NextRequest) {
         const { payer } = evt.data as {
           payer?: { organization_id?: string }
         }
+        console.log('[webhook] subscriptionItem.canceled/ended data:', JSON.stringify(evt.data, null, 2))
         const clerkOrgId = payer?.organization_id
+        console.log('[webhook] subscriptionItem.canceled/ended clerkOrgId:', clerkOrgId)
         if (!clerkOrgId) break
-        await updateOrganizationBilling({
+        const updateResult = await updateOrganizationBilling({
           clerkOrgId,
           planSlug: 'free_org',
           subscriptionStatus: 'canceled',
         })
+        console.log('[webhook] subscriptionItem.canceled/ended update result:', JSON.stringify(updateResult, null, 2))
         break
       }
       case 'subscriptionItem.active':
       case 'subscriptionItem.updated': {
         const data = evt.data as any
+        console.log('[webhook] subscriptionItem.active/updated data:', JSON.stringify(data, null, 2))
         const clerkOrgId = data.payer?.organization_id || data.organization_id || data.organization?.id
+        console.log('[webhook] subscriptionItem.active/updated clerkOrgId:', clerkOrgId)
         if (!clerkOrgId) break
 
         const organization = await db.organization.findUnique({
           where: { clerkOrgId },
         })
+        console.log('[webhook] subscriptionItem.active/updated found organization:', organization ? `${organization.id} (plan: ${organization.plan})` : 'null')
         if (!organization) {
           try {
             const client = await clerkClient()
             const clerkOrg = await client.organizations.getOrganization({
               organizationId: clerkOrgId,
             })
+            console.log('[webhook] subscriptionItem.active/updated fetched clerk org:', JSON.stringify(clerkOrg, null, 2))
             await upsertOrganizationFromClerk({
               clerkOrgId,
               name: clerkOrg.name,
@@ -177,11 +196,14 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        await updateOrganizationBilling({
+        const planSlug = extractPlanSlugFromClerkRecord(data)
+        console.log('[webhook] subscriptionItem.active/updated extracted planSlug:', planSlug)
+        const updateResult = await updateOrganizationBilling({
           clerkOrgId,
-          planSlug: extractPlanSlugFromClerkRecord(data),
+          planSlug,
           subscriptionStatus: data.status ?? 'active',
         })
+        console.log('[webhook] subscriptionItem.active/updated update result:', JSON.stringify(updateResult, null, 2))
         break
       }
       default:
