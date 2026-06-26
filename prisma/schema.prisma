@@ -1,0 +1,166 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Multi-tenant organization model
+model Organization {
+  id         String  @id @default(cuid())
+  clerkOrgId String  @unique
+  name       String
+  slug       String  @unique
+  image      String?
+  logoUrl    String?
+
+  // Subscription & Billing
+  plan                 Plan    @default(FREE)
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  subscriptionStatus   String? @default("active")
+
+  // Team members
+  members OrganizationMember[]
+  forms   Form[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clerkOrgId])
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  clerkUserId    String
+  email          String
+  role           MemberRole   @default(VIEWER)
+  invitedAt      DateTime     @default(now())
+  joinedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, clerkUserId])
+  @@index([organizationId])
+  @@index([clerkUserId])
+}
+
+enum MemberRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+// User preferences
+model User {
+  id          String  @id @default(cuid())
+  clerkUserId String  @unique
+  email       String  @unique
+  firstName   String?
+  lastName    String?
+  avatar      String?
+
+  // Default organization
+  defaultOrgId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Form {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  title        String
+  description  String?
+  schema       Json // JSON Schema for form definition
+  theme        Json? // Theme customization
+  conditionals Json? // Conditional logic rules
+
+  // Form status and settings
+  isPublished Boolean    @default(false)
+  status      FormStatus @default(DRAFT)
+
+  // Analytics & tracking
+  pageViews Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submissions FormSubmission[]
+
+  @@index([organizationId])
+}
+
+enum FormStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  ARCHIVED
+}
+
+model FormSubmission {
+  id     String @id @default(cuid())
+  formId String
+  form   Form   @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  data           Json // Submitted form data
+  schemaSnapshot Json? // Snapshot of the schema at time of submission for historical integrity
+  sourceDevice   String? // Device type (mobile, desktop, tablet)
+  sourceUrl      String? // Referral source
+
+  isStarred Boolean  @default(false)
+  tags      String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([formId])
+}
+
+// Webhooks for integrations
+model Webhook {
+  id             String @id @default(cuid())
+  organizationId String
+
+  url      String
+  events   String[]
+  isActive Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// Activity logs for audit trail
+model ActivityLog {
+  id             String @id @default(cuid())
+  organizationId String
+  clerkUserId    String
+
+  action       String // e.g., "form_created", "submission_received"
+  resourceType String // e.g., "form", "submission"
+  resourceId   String?
+  details      Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([clerkUserId])
+}
