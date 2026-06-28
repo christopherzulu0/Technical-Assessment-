@@ -45,6 +45,298 @@ A key requirement was ensuring that stored submissions stay valid against the co
 ### Real-time Synchronization
 - The dashboard uses a 10-second polling mechanism to fetch the latest statistics and form lists, ensuring data stays in sync without manual page refreshes.
 
+## Project Structure
+
+```
+assignment-b/
+├── app/                          # Next.js App Router
+│   ├── api/                     # API Routes
+│   │   ├── dashboard/          # Dashboard stats endpoint
+│   │   ├── forms/              # Form CRUD operations
+│   │   ├── organizations/      # Organization management
+│   │   └── webhooks/           # Webhook integrations (Clerk sync)
+│   ├── dashboard/              # Dashboard pages
+│   ├── forms/                  # Form viewing and submission pages
+│   ├── onboarding/             # Onboarding flow
+│   ├── pricing/                # Pricing page
+│   └── sign-in/sign-up/        # Authentication pages
+├── components/                  # React Components
+│   ├── ui/                     # Shadcn UI components
+│   ├── billing/                # Billing-related components
+│   ├── form-*.tsx              # Form management components
+│   ├── dashboard-*.tsx         # Dashboard components
+│   └── team-collaboration.tsx  # Team management
+├── lib/                         # Utility libraries
+│   ├── auth.ts                 # Authentication & authorization
+│   ├── clerk-sync.ts           # Clerk webhook sync logic
+│   ├── db.ts                   # Prisma client
+│   ├── validators.ts           # Form validation (Ajv + Zod)
+│   ├── entitlements.ts         # Plan-based feature access
+│   └── plans.ts                # Plan configuration
+├── prisma/                      # Database
+│   ├── schema.prisma           # Database schema
+│   └── migrations/             # Database migrations
+└── tests/                       # Test files
+```
+
+## API Endpoints
+
+### Forms API
+
+#### `GET /api/forms`
+- **Purpose**: List all forms for an organization
+- **Auth**: Required (organization member)
+- **Query Params**: `orgId` (optional)
+- **Response**: Array of forms with submission counts
+
+#### `POST /api/forms`
+- **Purpose**: Create a new form
+- **Auth**: Required (EDITOR or OWNER role)
+- **Body**: Form schema definition (validated by Zod)
+- **Response**: Created form with generated JSON Schema
+
+#### `GET /api/forms/[id]`
+- **Purpose**: Get form details (public endpoint for form viewing)
+- **Auth**: Not required (public form access)
+- **Response**: Form schema with submission count
+- **Side Effect**: Increments page view counter
+
+#### `DELETE /api/forms/[id]`
+- **Purpose**: Delete a form
+- **Auth**: Required (EDITOR or OWNER role)
+- **Response**: Success confirmation
+
+#### `POST /api/forms/[id]/submit`
+- **Purpose**: Submit form response
+- **Auth**: Not required (public submission)
+- **Body**: Form submission data
+- **Validation**: Validated against stored JSON Schema using Ajv
+- **Response**: Submission ID with schema snapshot
+
+#### `GET /api/forms/[id]/submissions`
+- **Purpose**: Get all submissions for a form
+- **Auth**: Required (organization member)
+- **Query Params**: `page`, `limit`
+- **Response**: Paginated submissions list
+
+#### `GET /api/forms/check-limit`
+- **Purpose**: Check if organization can create more forms
+- **Auth**: Required
+- **Response**: `{ allowed, reason, currentForms, limit, plan }`
+
+### Organizations API
+
+#### `GET /api/organizations`
+- **Purpose**: List user's organizations
+- **Auth**: Required
+- **Response**: Array of organizations with user's role
+
+#### `POST /api/organizations`
+- **Purpose**: Sync organization from Clerk
+- **Auth**: Required
+- **Body**: Uses active Clerk organization
+- **Response**: Synced organization details
+
+### Dashboard API
+
+#### `GET /api/dashboard/stats`
+- **Purpose**: Get dashboard statistics
+- **Auth**: Required (organization member)
+- **Query Params**: `orgId` (required)
+- **Response**: `{ totalForms, totalResponses, teamMembers, avgCompletion }`
+
+### Webhooks API
+
+#### `GET /api/webhooks`
+- **Purpose**: List organization webhooks
+- **Auth**: Required (organization member)
+- **Headers**: `x-organization-id` (optional)
+- **Response**: Array of webhooks
+
+#### `POST /api/webhooks`
+- **Purpose**: Create webhook
+- **Auth**: Required (organization member)
+- **Body**: `{ url, events[] }`
+- **Response**: Created webhook
+
+#### `DELETE /api/webhooks`
+- **Purpose**: Delete webhook
+- **Auth**: Required (organization member)
+- **Query Params**: `id`
+- **Response**: Success confirmation
+
+### Clerk Webhook API
+
+#### `POST /api/webhooks/clerk`
+- **Purpose**: Handle Clerk webhook events
+- **Auth**: Signature verification via `CLERK_WEBHOOK_SECRET`
+- **Events Handled**:
+  - `user.created/updated/deleted` - User sync
+  - `organization.created/updated/deleted` - Organization sync
+  - `organizationMembership.created/updated/deleted` - Member sync
+  - `subscription.*` - Billing and plan updates
+  - `subscriptionItem.*` - Subscription item updates
+
+## Database Schema
+
+### Core Models
+
+#### Organization
+- Multi-tenant container for forms and members
+- Fields: `clerkOrgId`, `name`, `slug`, `plan`, `stripeCustomerId`, `subscriptionStatus`
+- Relationships: Has many `OrganizationMember`, `Form`, `Webhook`, `ActivityLog`
+
+#### OrganizationMember
+- Links users to organizations with roles
+- Fields: `organizationId`, `clerkUserId`, `role` (OWNER/EDITOR/VIEWER)
+- Unique constraint: `(organizationId, clerkUserId)`
+- Roles: OWNER (full access), EDITOR (form management), VIEWER (read-only)
+
+#### User
+- User profile data
+- Fields: `clerkUserId`, `email`, `firstName`, `lastName`, `avatar`, `defaultOrgId`
+
+#### Form
+- Dynamic form definition with JSON Schema
+- Fields: `organizationId`, `title`, `description`, `schema` (JSONB), `status` (DRAFT/PUBLISHED/CLOSED/ARCHIVED), `isPublished`, `pageViews`
+- Relationships: Has many `FormSubmission`
+
+#### FormSubmission
+- User form responses with historical integrity
+- Fields: `formId`, `data` (JSONB), `schemaSnapshot` (JSONB), `sourceDevice`, `sourceUrl`, `isStarred`, `tags`
+- Key Feature: `schemaSnapshot` preserves validation rules at submission time
+
+#### Webhook
+- External webhook integrations
+- Fields: `organizationId`, `url`, `events[]`, `isActive`
+
+#### ActivityLog
+- Audit trail for organization actions
+- Fields: `organizationId`, `clerkUserId`, `action`, `resourceType`, `resourceId`, `details` (JSONB)
+
+### Enums
+
+#### Plan
+- `FREE`, `STARTER`, `PROFESSIONAL`, `ENTERPRISE`
+- Determines feature limits (forms, webhooks, conditional logic, SSO)
+
+#### MemberRole
+- `OWNER`, `EDITOR`, `VIEWER`
+- Controls access permissions
+
+#### FormStatus
+- `DRAFT`, `PUBLISHED`, `CLOSED`, `ARCHIVED`
+- Form lifecycle states
+
+## Authentication & Authorization
+
+### Authentication Flow
+
+1. **Clerk Integration**: Uses Clerk for authentication (sign-in/sign-up)
+2. **Session Management**: Clerk middleware handles session validation
+3. **User Sync**: Webhooks sync user data to local database on creation/update
+
+### Authorization Layers
+
+#### 1. Authentication Check (`requireAuth`)
+- Validates user is authenticated via Clerk
+- Returns `{ userId, orgId }` from session
+
+#### 2. Organization Access (`requireOrgAccess`)
+- Verifies user is member of the organization
+- Syncs organization details from Clerk on access
+- Returns `{ organization, member }`
+
+#### 3. Role-Based Access
+- **`requireEditorAccess`**: Blocks VIEWER role from mutations
+- **`requireFormEditorAccess`**: Checks form ownership + EDITOR/OWNER role
+- **`requireFormOrgAccess`**: Checks form organization membership
+
+#### 4. Plan-Based Entitlements (`entitlements.ts`)
+- **`canCreateForm`**: Checks form limits based on plan
+- **`hasFeature`**: Checks feature access (webhooks, conditional logic, SSO)
+- Plan limits enforced at API level
+
+### Authorization Matrix
+
+| Action | VIEWER | EDITOR | OWNER |
+|--------|--------|--------|-------|
+| View forms | ✅ | ✅ | ✅ |
+| View submissions | ✅ | ✅ | ✅ |
+| Create forms | ❌ | ✅ | ✅ |
+| Edit forms | ❌ | ✅ | ✅ |
+| Delete forms | ❌ | ✅ | ✅ |
+| Manage members | ❌ | ❌ | ✅ |
+| Manage billing | ❌ | ❌ | ✅ |
+
+## Components Overview
+
+### Form Management
+- **`form-builder.tsx`**: Dynamic form builder with field types
+- **`dynamic-form-renderer.tsx`**: Renders forms from JSON Schema
+- **`form-settings.tsx`**: Form status and sharing settings
+- **`form-share-export.tsx`**: Form sharing and export options
+- **`forms-list.tsx`**: Form list with loading/error states
+
+### Dashboard
+- **`dashboard-stats.tsx`**: Real-time statistics display
+- **`dashboard-nav.tsx`**: Dashboard navigation
+- **`forms-list.tsx`**: Form management table
+
+### Advanced Features
+- **`conditional-logic-builder.tsx`**: Form conditional logic editor
+- **`form-theme-customizer.tsx`**: Form appearance customization
+- **`webhook-integrations.tsx`**: Webhook management
+- **`team-collaboration.tsx`**: Team member management
+
+### UI Components
+- **`site-header.tsx`**: Application header
+- **`page-container.tsx`**: Page layout wrapper
+- **`org-switcher.tsx`**: Organization switcher
+- **`response-filters.tsx`**: Submission filtering
+
+## Key Libraries
+
+### Validation
+- **Zod**: API request validation
+- **Ajv**: JSON Schema validation for form submissions
+
+### Database
+- **Prisma**: ORM with PostgreSQL
+- **JSONB**: Dynamic schema storage
+
+### Authentication
+- **Clerk**: Authentication, organizations, billing
+
+### UI
+- **Shadcn UI**: Component library
+- **Tailwind CSS**: Styling
+- **Lucide React**: Icons
+
+## AI Tools Usage
+
+During the development of this project, I used the following AI tools:
+
+### Tools Used
+- **Cascade (Cognition AI)**: Primary AI coding assistant for scaffolding, debugging, code generation, and documentation.
+- **v0 (Vercel)**: AI-powered UI component generation for rapid prototyping of form interfaces and dashboard layouts.
+- **Cursor (Cursor AI)**: AI code editor used for refactoring, code completion, and implementing complex features like webhook integrations.
+
+### How AI Was Used
+- **Scaffolding**: Generated initial project structure, including Next.js App Router setup, Prisma schema, and basic API routes.
+- **Code Generation**: Wrote form builder components, validation logic using Ajv, webhook handlers for Clerk integration, and dashboard analytics.
+- **Debugging**: Identified and fixed issues with Clerk authentication flow, webhook signature verification, and form submission validation.
+- **Documentation**: Assisted in writing this README, including design decisions, trade-offs, and setup instructions.
+- **Code Review**: Reviewed and refactored code for better structure, error handling, and type safety.
+
+### Verification
+All code generated by AI was reviewed and tested. I understand and can explain:
+- The database schema and relationships between Organizations, Forms, and FormSubmissions.
+- The JSON Schema validation flow using Ajv.
+- The Clerk webhook integration and signature verification.
+- The role-based access control implementation.
+- The frontend component structure and state management.
+
 ## Trade-offs & Scaling
 
 ### Trade-offs made:

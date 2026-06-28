@@ -13,7 +13,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'FormBuilder - Create Professional Forms',
   description: 'Create beautiful, responsive forms in minutes with advanced analytics and real-time responses.',
-  generator: 'v0.app',
   icons: {
     icon: [
       {
