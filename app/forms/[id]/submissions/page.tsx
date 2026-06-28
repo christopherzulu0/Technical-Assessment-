@@ -64,21 +64,27 @@ export default function SubmissionsPage() {
       setIsLoading(true)
 
       const formResponse = await fetch(`/api/forms/${formId}`)
-      if (!formResponse.ok) throw new Error('Form not found')
+      if (!formResponse.ok) {
+        const errorData = await formResponse.json()
+        throw new Error(errorData.error || 'Form not found')
+      }
       const formData = await formResponse.json()
       setForm(formData)
 
       const submissionsResponse = await fetch(
         `/api/forms/${formId}/submissions?page=${page}&limit=${limit}`
       )
-      if (!submissionsResponse.ok) throw new Error('Failed to fetch submissions')
+      if (!submissionsResponse.ok) {
+        const errorData = await submissionsResponse.json()
+        throw new Error(errorData.error || 'Failed to fetch submissions')
+      }
       const submissionsData = await submissionsResponse.json()
       setSubmissions(submissionsData.submissions)
       setTotalPages(submissionsData.pagination.pages)
       setError(null)
     } catch (err: any) {
       setError(err.message)
-      console.error('[v0] Error fetching:', err)
+      console.error('[submissions] Error fetching:', err)
     } finally {
       setIsLoading(false)
     }

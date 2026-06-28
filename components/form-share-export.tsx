@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Copy, Download, Share2 } from 'lucide-react'
+import { Copy, Download, Share2, AlertCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -11,6 +11,15 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 interface FormShareExportProps {
   formId: string
@@ -19,6 +28,12 @@ interface FormShareExportProps {
 
 export function FormShareExport({ formId, formTitle }: FormShareExportProps) {
   const [copiedLink, setCopiedLink] = useState(false)
+  const [exportingFormat, setExportingFormat] = useState<'csv' | 'json' | null>(null)
+  const [errorDialog, setErrorDialog] = useState<{
+    open: boolean
+    title: string
+    message: string
+  }>({ open: false, title: '', message: '' })
 
   const formLink = `${typeof window !== 'undefined' ? window.location.origin : ''}/forms/${formId}/view`
 
@@ -29,24 +44,47 @@ export function FormShareExport({ formId, formTitle }: FormShareExportProps) {
   }
 
   const handleExportSubmissions = async (format: 'csv' | 'json') => {
+    setExportingFormat(format)
     try {
       const response = await fetch(`/api/forms/${formId}/submissions`)
-      const submissions = await response.json()
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to fetch submissions')
+      }
+      const data = await response.json()
+      const submissions = data.submissions
 
-      if (!Array.isArray(submissions)) return
+      if (!Array.isArray(submissions) || submissions.length === 0) {
+        setErrorDialog({
+          open: true,
+          title: 'No Submissions',
+          message: 'There are no submissions to export yet.',
+        })
+        return
+      }
 
       let content: string
       let filename: string
 
       if (format === 'csv') {
-        const fields = submissions[0] ? Object.keys(submissions[0]) : []
+        // Flatten the data field for CSV export
+        const flattenedSubmissions = submissions.map((submission: any) => ({
+          id: submission.id,
+          createdAt: submission.createdAt,
+          ...submission.data,
+        }))
+        
+        const fields = flattenedSubmissions[0] ? Object.keys(flattenedSubmissions[0]) : []
         const headers = fields.join(',')
-        const rows = submissions.map((submission: any) =>
+        const rows = flattenedSubmissions.map((submission: any) =>
           fields
             .map((field) => {
               const value = submission[field]
               if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
                 return `"${value.replace(/"/g, '""')}"`
+              }
+              if (typeof value === 'object') {
+                return `"${JSON.stringify(value).replace(/"/g, '""')}"`
               }
               return value
             })
@@ -72,7 +110,13 @@ export function FormShareExport({ formId, formTitle }: FormShareExportProps) {
       document.body.removeChild(a)
     } catch (error) {
       console.error('Export failed:', error)
-      alert('Failed to export submissions')
+      setErrorDialog({
+        open: true,
+        title: 'Export Failed',
+        message: error instanceof Error ? error.message : 'Failed to export submissions',
+      })
+    } finally {
+      setExportingFormat(null)
     }
   }
 
@@ -147,17 +191,40 @@ export function FormShareExport({ formId, formTitle }: FormShareExportProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className='flex gap-2'>
-          <Button className='flex-1' onClick={() => handleExportSubmissions('csv')}>
-            <Download data-icon='inline-start' />
-            Export CSV
+          <Button 
+            className='flex-1' 
+            onClick={() => handleExportSubmissions('csv')}
+            disabled={exportingFormat !== null}
+          >
+            {exportingFormat === 'csv' ? (
+              <>
+                <Loader2 className='w-4 h-4 mr-2 animate-spin' />
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download data-icon='inline-start' />
+                Export CSV
+              </>
+            )}
           </Button>
           <Button
             variant='outline'
             className='flex-1'
             onClick={() => handleExportSubmissions('json')}
+            disabled={exportingFormat !== null}
           >
-            <Download data-icon='inline-start' />
-            Export JSON
+            {exportingFormat === 'json' ? (
+              <>
+                <Loader2 className='w-4 h-4 mr-2 animate-spin' />
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download data-icon='inline-start' />
+                Export JSON
+              </>
+            )}
           </Button>
         </CardContent>
       </Card>
@@ -189,6 +256,20 @@ export function FormShareExport({ formId, formTitle }: FormShareExportProps) {
           </Button>
         </CardContent>
       </Card>
+
+      <AlertDialog open={errorDialog.open} onOpenChange={(open: boolean) => setErrorDialog({ ...errorDialog, open })}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{errorDialog.title}</AlertDialogTitle>
+            <AlertDialogDescription>{errorDialog.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setErrorDialog({ ...errorDialog, open: false })}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -9,12 +9,17 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    await requireFormOrgAccess(id)
+    console.log('[submissions] Fetching submissions for form:', id)
+    
+    const result = await requireFormOrgAccess(id)
+    console.log('[submissions] Access granted for form:', id)
 
     const { searchParams } = new URL(request.url)
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
     const limit = Math.min(100, parseInt(searchParams.get('limit') || '50'))
     const skip = (page - 1) * limit
+
+    console.log('[submissions] Query params:', { page, limit, skip })
 
     const [submissions, total] = await Promise.all([
       db.formSubmission.findMany({
@@ -28,6 +33,8 @@ export async function GET(
       }),
     ])
 
+    console.log('[submissions] Found submissions:', submissions.length, 'total:', total)
+
     return NextResponse.json({
       submissions,
       pagination: {
@@ -38,10 +45,12 @@ export async function GET(
       },
     })
   } catch (error) {
+    console.error('[submissions] Error:', error)
     if (error instanceof AuthError) {
+      console.error('[submissions] AuthError:', error.message, error.status)
       return NextResponse.json({ error: error.message }, { status: error.status })
     }
-    console.error('[v0] GET /api/forms/[id]/submissions error:', error)
+    console.error('[submissions] Unexpected error:', error)
     return NextResponse.json({ error: 'Failed to fetch submissions' }, { status: 500 })
   }
 }

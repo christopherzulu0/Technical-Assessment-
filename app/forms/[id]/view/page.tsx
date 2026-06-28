@@ -138,7 +138,7 @@ export default function FormViewPage() {
                   Your response has been submitted successfully and received.
                 </CardDescription>
               </div>
-              <Button size='lg' render={<Link href='/' />} nativeButton={false} className='bg-primary hover:bg-primary/90 mt-4'>
+              <Button size='lg' render={<Link href='/dashboard' />} nativeButton={false} className='bg-primary hover:bg-primary/90 mt-4'>
                 Return Home
               </Button>
             </CardContent>

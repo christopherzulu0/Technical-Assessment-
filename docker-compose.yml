@@ -1,39 +1,15 @@
-services:
-  db:
-    image: postgres:15-alpine
-    container_name: dynamic-form-db
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: submissions
-    ports:
-      - '5433:5433'
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+version: '3.8'
 
+services:
   app:
+    container_name: assessment-app
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: dynamic-form-app
+     
     restart: always
     ports:
-      - '3000:3000'
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/submissions?schema=public
-      - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
-      - CLERK_WEBHOOK_SECRET=${CLERK_WEBHOOK_SECRET}
-      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
-    depends_on:
-      db:
-        condition: service_healthy
-
-volumes:
-  postgres_data:
+      - 3000:3000
+    env_file:
+      - .env.production
+     
